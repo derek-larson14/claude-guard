@@ -1,0 +1,9 @@
+{
+  "name": "claude-guard",
+  "version": "1.0.0",
+  "description": "Security hooks for Claude Code — block credential theft, network exfiltration, and persistence attacks",
+  "author": {
+    "name": "derek-larson14"
+  },
+  "homepage": "https://github.com/derek-larson14/claude-guard"
+}

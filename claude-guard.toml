@@ -1,0 +1,35 @@
+# claude-guard.toml — security guard configuration
+#
+# Each guard has an enabled flag + its own settings.
+# Env overrides: CLAUDE_GUARD_<NAME>=off disables a guard for one session.
+# Project override: .claude/claude-guard.toml overrides this file.
+
+[path-guard]
+enabled = true
+# Blocks reads to credentials, messages, browser sessions, keychains,
+# clipboard access, shell history, and .env files.
+# See guards/path-guard.sh for the full blocklist.
+
+[write-guard]
+enabled = true
+allow_persistence = false  # set to true if you manage LaunchAgents/crontab through Claude
+# Blocks writes to shell rc files, SSH authorized_keys, /etc/, and Application Scripts.
+# With allow_persistence = false (default), also blocks LaunchAgents, crontab,
+# launchctl load, and systemd user services.
+# See guards/write-guard.sh for the full list.
+
+[network-guard]
+enabled = false
+mode = "pattern"  # "sandbox" (kernel-level, macOS only) | "pattern" (regex blocklist) | "off"
+# sandbox: wraps ALL Bash commands in sandbox-exec (macOS only, blocks all network)
+# pattern: blocks weaponized patterns (curl -b, netcat, ssh -i, etc.) but allows normal network
+# off: no network restrictions (pattern checks still run as defense-in-depth)
+# Enable this for autonomous/scheduled sessions where network access isn't needed.
+
+[workspace-guard]
+enabled = false  # opt-in — breaks cross-repo work
+allowed_roots = ""  # colon-separated paths; empty = $CLAUDE_PROJECT_DIR only
+
+[audit-log]
+enabled = true
+path = "~/.claude/logs/claude-audit.jsonl"
