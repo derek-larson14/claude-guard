@@ -20,7 +20,7 @@ Set `GUARD_DIR` to the directory containing the found script.
 If not found anywhere, tell the user to install the plugin:
 ```
 /plugin marketplace add derek-larson14/claude-guard
-/plugin install claude-guard
+/plugin install claude-guard@claude-guard
 ```
 Then try `/claude-guard:setup` again.
 

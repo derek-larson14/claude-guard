@@ -27,7 +27,7 @@ AI coding agents have access to your local files. That includes SSH keys, browse
 
 ```
 /plugin marketplace add derek-larson14/claude-guard
-/plugin install claude-guard
+/plugin install claude-guard@claude-guard
 ```
 
 Then run setup from inside Claude:
