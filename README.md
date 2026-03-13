@@ -89,7 +89,34 @@ enabled = true
 path = "~/.claude/logs/claude-audit.jsonl"
 ```
 
-Project override: `.claude/claude-guard.toml`. Environment variables work too: `CLAUDE_GUARD_PATH_GUARD=off` disables path-guard for a single session.
+Project override: `.claude/claude-guard.toml`.
+
+## Per-Session Overrides
+
+Every guard can be toggled per session via environment variables.
+
+**Enable or disable any guard:**
+```bash
+CLAUDE_GUARD_NETWORK_GUARD=on   # force-enable (even if disabled in config)
+CLAUDE_GUARD_PATH_GUARD=off     # disable for this session only
+```
+
+**Override specific settings:**
+```bash
+CLAUDE_GUARD_NETWORK_MODE=sandbox              # switch network mode
+CLAUDE_GUARD_ALLOWED_ROOTS="/path/a:/path/b"   # restrict workspace to these dirs
+```
+
+**Example: autonomous coding agent with locked-down permissions**
+```bash
+CLAUDE_GUARD_NETWORK_GUARD=on \
+CLAUDE_GUARD_NETWORK_MODE=sandbox \
+CLAUDE_GUARD_WORKSPACE_GUARD=on \
+CLAUDE_GUARD_ALLOWED_ROOTS="$HOME/Github/my-app:$HOME/Github/my-lib" \
+claude -p "fix the scroll bug" --dangerously-skip-permissions
+```
+
+This allows running different agents with different security profiles from the same machine, without changing your defaults.
 
 ## Limitations
 
