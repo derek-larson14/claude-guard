@@ -6,8 +6,15 @@ Built by [Derek Larson](https://dtlarson.com). Read the backstory: [Keys to the 
 
 ## Install
 
+**Step 1:** Add the marketplace source
+
 ```
 /plugin marketplace add derek-larson14/claude-guard
+```
+
+**Step 2:** Install the plugin
+
+```
 /plugin install claude-guard@claude-guard
 ```
 
