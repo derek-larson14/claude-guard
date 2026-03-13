@@ -1,6 +1,6 @@
 # Claude Guard
 
-Security hooks for Claude Code. Blocks access to credentials, browser sessions, keychains, messages, and clipboard. Sandboxes network from Bash. Prevents persistence attacks.
+Security hooks for Claude Code. Scope permissions per session so each agent only gets the access it needs. Blocks credentials, browser sessions, keychains, messages, and clipboard. Sandboxes network from Bash. Prevents persistence attacks.
 
 Built by [Derek Larson](https://dtlarson.com). Read the backstory: [Keys to the Castle](https://dtlarson.com/keys-to-the-castle).
 
@@ -25,6 +25,28 @@ Then run setup:
 ```
 
 Setup walks you through hook registration, deny list, and verification.
+
+## Per-Session Overrides
+
+Every guard can be overridden by putting environment variables inline before the `claude` command. They only apply to that one process and disappear when it exits.
+
+```bash
+# This Claude session has network sandboxing and workspace restriction.
+# The next one won't, unless you set these again.
+CLAUDE_GUARD_NETWORK_GUARD=on \
+CLAUDE_GUARD_NETWORK_MODE=sandbox \
+CLAUDE_GUARD_WORKSPACE_GUARD=on \
+CLAUDE_GUARD_ALLOWED_ROOTS="$HOME/Github/my-app:$HOME/Github/my-lib" \
+claude -p "fix the scroll bug" --dangerously-skip-permissions
+```
+
+**Available overrides:**
+```bash
+CLAUDE_GUARD_NETWORK_GUARD=on       # force-enable (even if disabled in config)
+CLAUDE_GUARD_PATH_GUARD=off         # disable for this session only
+CLAUDE_GUARD_NETWORK_MODE=sandbox   # switch network mode
+CLAUDE_GUARD_ALLOWED_ROOTS="/a:/b"  # restrict workspace to these dirs
+```
 
 ## What It Blocks
 
@@ -97,33 +119,6 @@ path = "~/.claude/logs/claude-audit.jsonl"
 ```
 
 Project override: `.claude/claude-guard.toml`.
-
-## Per-Session Overrides
-
-Every guard can be toggled per session via environment variables.
-
-**Enable or disable any guard:**
-```bash
-CLAUDE_GUARD_NETWORK_GUARD=on   # force-enable (even if disabled in config)
-CLAUDE_GUARD_PATH_GUARD=off     # disable for this session only
-```
-
-**Override specific settings:**
-```bash
-CLAUDE_GUARD_NETWORK_MODE=sandbox              # switch network mode
-CLAUDE_GUARD_ALLOWED_ROOTS="/path/a:/path/b"   # restrict workspace to these dirs
-```
-
-**Example: autonomous coding agent with locked-down permissions**
-```bash
-CLAUDE_GUARD_NETWORK_GUARD=on \
-CLAUDE_GUARD_NETWORK_MODE=sandbox \
-CLAUDE_GUARD_WORKSPACE_GUARD=on \
-CLAUDE_GUARD_ALLOWED_ROOTS="$HOME/Github/my-app:$HOME/Github/my-lib" \
-claude -p "fix the scroll bug" --dangerously-skip-permissions
-```
-
-This allows running different agents with different security profiles from the same machine, without changing your defaults.
 
 ## Limitations
 
