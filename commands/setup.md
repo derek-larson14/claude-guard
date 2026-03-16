@@ -7,7 +7,7 @@ allowed-tools: Read, Glob, Grep, Bash, AskUserQuestion, Edit, Write
 
 **Claude Code only.** macOS and Linux.
 
-Interactive setup. Walks through hook registration, deny list, and verification.
+Interactive setup. All questions go through AskUserQuestion. The actual installation is done by setup.sh with flags.
 
 ## Finding Guard Scripts
 
@@ -24,54 +24,59 @@ If not found anywhere, tell the user to install the plugin:
 ```
 Then try `/claude-guard:setup` again.
 
-## Step 1: Verify hooks are registered
+## Step 1: Check existing hooks
 
 Read `~/.claude/settings.json`. Check if `hooks.PreToolUse` contains an entry matching `claude-guard`.
 
-If hooks are already registered, tell the user and skip to Step 2.
+If hooks are already registered, tell the user and skip to the questions.
 
 If not registered, use AskUserQuestion:
 "Where should Claude Guard hooks be registered?"
-- Global (~/.claude/settings.json) (Recommended) -- applies to all projects
-- Project (.claude/settings.json) -- only this project
+- Global (~/.claude/settings.json) — applies to all projects
+- Project (.claude/settings.json) — only this project
 
-Register the hooks by editing the chosen settings file. The PreToolUse hook should match `Bash|Read|Edit|Write|Grep|Glob` and run the claude-guard.sh dispatcher. The PostToolUse hook should match `*` and run audit-log.sh.
+Remember the answer as `--scope global` or `--scope project`.
 
-## Step 2: Recommended deny list
+If hooks already exist in the file, use AskUserQuestion:
+"Your settings file already has hooks. How should we add Claude Guard?"
+- Merge (append alongside existing hooks)
+- Replace (overwrite existing hooks)
+- Skip (don't touch hooks)
 
-Use AskUserQuestion:
-"Add recommended deny list to block dangerous commands at the permissions level?"
-- Yes (Recommended) -- adds sqlite3, clipboard, browser debug port, keychain blocking
-- No -- skip
+Remember as `--merge`, `--replace`, or `--skip`.
 
-If yes, append these to `permissions.deny` (deduplicate against existing):
-```json
-[
-  "Bash(sqlite3 *)",
-  "Bash(security dump-keychain*)",
-  "Bash(security find-generic-password*)",
-  "Bash(security find-internet-password*)",
-  "Bash(security export*)",
-  "Bash(pbpaste)",
-  "Bash(pbpaste *)",
-  "Bash(pbcopy)",
-  "Bash(pbcopy *)",
-  "Bash(*remote-debugging-port*)",
-  "Bash(*remote-debugging-pipe*)",
-  "Bash(*remote-debugging-address*)"
-]
-```
+## Step 2: Configure protections
 
-Also remove `pbpaste`/`pbcopy` from `permissions.allow` if present.
+Ask these one at a time using AskUserQuestion. Collect flags for setup.sh.
 
-## Step 3: Verify
+**Question 1:** "Do you use SQLite in your projects? (If no, we'll block sqlite3 to protect browser databases and password vaults)"
+- Yes → no flag
+- No → add `--sqlite-deny`
 
-Run a quick test:
+**Question 2:** "Does your project have .env files Claude should be able to read? (If yes, we'll only block .env in your home directory)"
+- Yes → add `--env-project-allowed`
+- No → no flag
+
+**Question 3:** "Do you use AppleScript/osascript for automation (Reminders, Calendar, Finder, etc.)?"
+- Yes → no flag
+- No → add `--block-osascript`
+
+**Question 4:** "Do you manage LaunchAgents or crontab through Claude?"
+- Yes → add `--allow-persistence`
+- No → no flag
+
+## Step 3: Run setup.sh
+
+Build the command from collected flags and run it:
 ```bash
-echo '{"tool_name":"Read","tool_input":{"file_path":"~/.ssh/id_rsa"}}' | $GUARD_DIR/claude-guard.sh
+$GUARD_DIR/setup.sh --deny-list [collected flags]
 ```
-Verify it returns a deny. Report success or failure.
+
+Always include `--deny-list`. Example with all flags:
+```bash
+$GUARD_DIR/setup.sh --deny-list --sqlite-deny --env-project-allowed --block-osascript --allow-persistence --scope global
+```
 
 ## Step 4: Summary
 
-Print what was configured: which guards are on, what deny rules were added, where the scripts live. Mention `/claude-guard:configure` to change individual guard settings.
+Report what setup.sh output. Mention `/claude-guard:configure` to change settings later.

@@ -232,17 +232,35 @@ for pattern in "${BLOCKED_PATTERNS[@]}"; do
   fi
 done
 
-# Block .env file reads (but allow .venv directories)
+# Block .env file reads — scoped based on setup preferences.
+# If .env-project-allowed marker exists (user said yes to project .env access during setup),
+# only block home directory .env files. Otherwise block all .env files.
+GUARD_DIR="${CLAUDE_GUARD_INSTALL_DIR:-$HOME/.config/claude-guard}"
 if echo "$CHECK_STRING" | grep -qE '\.env($|[^a-zA-Z])'; then
   if ! echo "$CHECK_STRING" | grep -qF '.venv'; then
-    jq -n '{
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: "BLOCKED: .env files may contain credentials. Ask the user to provide specific values instead."
-      }
-    }'
-    exit 0
+    if [ -f "$GUARD_DIR/.env-project-allowed" ]; then
+      # Scoped mode: only block home directory .env files
+      if echo "$CHECK_STRING" | grep -qE "^$HOME_DIR/\.[^/]*env" || echo "$CHECK_STRING" | grep -qE "cat.*$HOME_DIR/\.[^/]*env"; then
+        jq -n '{
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: "BLOCKED: home directory .env files may contain production secrets. Project .env files are allowed."
+          }
+        }'
+        exit 0
+      fi
+    else
+      # Default: block all .env files
+      jq -n '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: "BLOCKED: .env files may contain credentials. Ask the user to provide specific values instead."
+        }
+      }'
+      exit 0
+    fi
   fi
 fi
 
