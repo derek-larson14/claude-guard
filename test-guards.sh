@@ -94,6 +94,10 @@ check_empty "self-protection allows guard write (when off)" "$OUT"
 OUT=$(echo '{"tool_name":"Read","tool_input":{"file_path":"/project/.venv/lib/site-packages/foo"}}' | "$GUARD")
 check_empty "allows .venv directories" "$OUT"
 
+# Test 13b: git commands skip path checks (commit messages can mention sensitive paths)
+OUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"git commit -m \"update env file handling\""}}' | "$GUARD")
+check_empty "allows git commands (no false positives on messages)" "$OUT"
+
 # --- write-guard ---
 echo "--- write-guard ---"
 export CLAUDE_GUARD_ALLOW_PERSISTENCE=off  # force-disable for persistence tests

@@ -36,6 +36,13 @@ esac
 # If nothing to check, allow
 [ -z "$CHECK_STRING" ] && exit 0
 
+# For Bash: git commands don't access file contents — commit messages, tag messages,
+# and log output can mention sensitive paths without it being a real file access.
+# Skip all path checks for git operations to avoid false positives.
+if [ "$TOOL_NAME" = "Bash" ] && echo "$CHECK_STRING" | grep -qE '^\s*git\b'; then
+  exit 0
+fi
+
 HOME_DIR="$HOME"
 
 # === BLOCKLIST ===
