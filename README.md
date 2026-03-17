@@ -1,6 +1,6 @@
 # Claude Guard
 
-Per-session security for Claude Code. Give each agent the access it needs, nothing more.
+Per-session security for Claude Code. Allow agents the access they need, and nothing more.
 
 ```bash
 # Locked-down coding agent: no network, can only touch this one repo.
@@ -9,8 +9,6 @@ CLAUDE_GUARD_WORKSPACE_GUARD=on \
 CLAUDE_GUARD_ALLOWED_ROOTS="$HOME/Github/my-app" \
 claude -p "fix the scroll bug" --dangerously-skip-permissions
 ```
-
-Different sessions get different permissions. No need to spin up another machine or configure a container. Just set env vars.
 
 Built by [Derek Larson](https://dtlarson.com). Read the backstory: [Keys to the Castle](https://dtlarson.com/keys-to-the-castle).
 
@@ -36,13 +34,28 @@ Then run setup:
 
 Setup asks about your environment and configures the right protections.
 
-## Audit Log
+## How It Works
 
-Every tool call is logged to `~/.claude/logs/claude-audit.jsonl`. For scheduled/autonomous agents, this is your compliance paper trail. See what each session touched, when, and whether any guard blocked it.
+Using a PreToolUse hook, four guards run in sequence, the first deny blocks the action.
+
+```
+Tool call → claude-guard.sh (dispatcher)
+  → path-guard.sh      blocks sensitive file reads
+  → write-guard.sh     blocks dangerous writes
+  → workspace-guard.sh optional: scopes to project dir
+  → network-guard.sh   sandboxes or blocks network
+  → audit-log.sh       logs to JSONL
+```
+
+**Network guard** has three modes: `sandbox` (macOS, kernel-level network blocking on all Bash), `pattern` (cross-platform, blocks weaponized patterns), or `off` (pattern checks still run as defense-in-depth).
+
+**File write sandbox** uses the same `sandbox-exec` mechanism as network sandbox. Set `CLAUDE_GUARD_SANDBOX_DENY_WRITE` to block Bash writes to specific directories, with `CLAUDE_GUARD_SANDBOX_ALLOW_WRITE` for exceptions. Activates automatically when deny-write paths are set, independent of network mode. Combined with workspace guard, this gives kernel-level write protection for Bash and hook-level protection for file tools.
+
+**Workspace guard** is optional. Restricts Read/Write/Edit/Grep/Glob to your project directory. Useful for locked-down automated scripts.
 
 ## Per-Session Overrides
 
-Every guard can be overridden by putting environment variables inline before the `claude` command. They only apply to that one process and disappear when it exits.
+Defualt settings can be overridden by putting environment variables inline before the `claude` command. 
 
 ```bash
 # This Claude session has network sandboxing and workspace restriction.
@@ -74,6 +87,15 @@ CLAUDE_GUARD_SANDBOX_DENY_WRITE="/protected/path"     # kernel-block Bash writes
 CLAUDE_GUARD_SANDBOX_ALLOW_WRITE="/protected/path/ok"  # exception within denied path
 ```
 
+## Commands
+
+```
+/claude-guard:setup        # first-time setup
+/claude-guard:scan         # full security audit
+/claude-guard:configure    # view/change guard settings
+/claude-guard:toggle       # turn all guards on or off
+```
+
 ## What It Blocks
 
 **Credentials** — SSH keys, AWS creds, API tokens, .env files, Docker/Kubernetes config
@@ -95,34 +117,6 @@ CLAUDE_GUARD_SANDBOX_ALLOW_WRITE="/protected/path/ok"  # exception within denied
 **Persistence** — LaunchAgents, crontab, systemd services, shell rc files, SSH authorized_keys
 
 **Browser hijacking** — `--remote-debugging-port`, Puppeteer/Playwright connect, Chrome DevTools Protocol
-
-## How It Works
-
-One dispatcher registered as a PreToolUse hook. Four guards run in sequence. First deny wins.
-
-```
-Tool call → claude-guard.sh (dispatcher)
-  → path-guard.sh      blocks sensitive file reads
-  → write-guard.sh     blocks dangerous writes
-  → workspace-guard.sh optional: scopes to project dir
-  → network-guard.sh   sandboxes or blocks network
-  → audit-log.sh       logs to JSONL
-```
-
-**Network guard** has three modes: `sandbox` (macOS, kernel-level network blocking on all Bash), `pattern` (cross-platform, blocks weaponized patterns), or `off` (pattern checks still run as defense-in-depth).
-
-**File write sandbox** uses the same `sandbox-exec` mechanism as network sandbox. Set `CLAUDE_GUARD_SANDBOX_DENY_WRITE` to block Bash writes to specific directories, with `CLAUDE_GUARD_SANDBOX_ALLOW_WRITE` for exceptions. Activates automatically when deny-write paths are set, independent of network mode. Combined with workspace guard, this gives kernel-level write protection for Bash and hook-level protection for file tools.
-
-**Workspace guard** is optional. Restricts Read/Write/Edit/Grep/Glob to your project directory. Useful for locked-down automated scripts.
-
-## Commands
-
-```
-/claude-guard:setup        # first-time setup
-/claude-guard:scan         # full security audit
-/claude-guard:configure    # view/change guard settings
-/claude-guard:toggle       # turn all guards on or off
-```
 
 ## Configuration
 
@@ -150,6 +144,10 @@ path = "~/.claude/logs/claude-audit.jsonl"
 
 Project override: `.claude/claude-guard.toml`.
 
+## Audit Log
+
+Every tool call is logged to `~/.claude/logs/claude-audit.jsonl` - you can see what each session touched, when, and whether a guard blocked it.
+
 ## Limitations
 
 Pattern matching is not perfect. A determined attacker can encode payloads or construct commands that bypass string matching. The sandbox modes on macOS are the strongest defense — they operate at the kernel level via `sandbox-exec`.
@@ -158,7 +156,7 @@ Workspace guard covers file tools (Read/Write/Edit/Grep/Glob) but not Bash. Use 
 
 Kernel-level sandbox (`sandbox-exec`) is macOS only. Linux falls back to pattern mode for network and has no file write sandbox.
 
-This is defense-in-depth, not a guarantee. Use it as one layer. Check the audit log.
+This is defense-in-depth, not a guarantee.
 
 ## Platform Support
 
