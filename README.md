@@ -47,6 +47,8 @@ Tool call → claude-guard.sh (dispatcher)
   → audit-log.sh       logs to JSONL
 ```
 
+**Path guard** blocks reads to credentials, browser sessions, keychains, clipboard, shell history, and more. Patterns are organized into categories that can be individually toggled in `claude-guard.toml` or via env vars. All categories default to ON if not specified, so removing config makes things stricter, not looser.
+
 **Network guard** has three modes: `sandbox` (macOS, kernel-level network blocking on all Bash), `pattern` (cross-platform, blocks weaponized patterns), or `off` (pattern checks still run as defense-in-depth).
 
 **File write sandbox** uses the same `sandbox-exec` mechanism as network sandbox. Set `CLAUDE_GUARD_SANDBOX_DENY_WRITE` to block Bash writes to specific directories, with `CLAUDE_GUARD_SANDBOX_ALLOW_WRITE` for exceptions. Activates automatically when deny-write paths are set, independent of network mode. Combined with workspace guard, this gives kernel-level write protection for Bash and hook-level protection for file tools.
@@ -85,6 +87,14 @@ CLAUDE_GUARD_NETWORK_MODE=sandbox   # switch network mode
 CLAUDE_GUARD_ALLOWED_ROOTS="/a:/b"  # restrict workspace to these dirs
 CLAUDE_GUARD_SANDBOX_DENY_WRITE="/protected/path"     # kernel-block Bash writes to path
 CLAUDE_GUARD_SANDBOX_ALLOW_WRITE="/protected/path/ok"  # exception within denied path
+
+# Path guard category overrides (turn individual categories on/off)
+CLAUDE_GUARD_PATH_CAT_CREDENTIALS=off      # allow credential file access
+CLAUDE_GUARD_PATH_CAT_CLIPBOARD=off        # allow clipboard access
+CLAUDE_GUARD_PATH_CAT_BROWSER_SESSIONS=off # allow browser data access
+# Categories: credentials, browser-sessions, messages, keychains,
+#   password-managers, system-data, shell-history, claude-internals,
+#   clipboard, browser-hijacking
 ```
 
 ## Commands
@@ -126,6 +136,19 @@ Guards configured through `claude-guard.toml`. Use `/claude-guard:configure` or 
 [path-guard]
 enabled = true
 
+# Toggle path guard categories individually. All default to ON if omitted.
+[path-guard.categories]
+credentials = true         # SSH, AWS, API tokens, .env, Docker/K8s config
+browser-sessions = true    # Chrome, Arc, Firefox, Safari, Brave, Edge, Dia
+messages = true            # iMessage, Mail, Signal
+keychains = true           # macOS Keychains, Accounts, security CLI
+password-managers = true   # 1Password, GNOME keyring, GPG
+system-data = true         # macOS Group Containers (mail, messages, contacts)
+shell-history = true       # .bash_history, .zsh_history, .psql_history
+claude-internals = true    # .claude/history, backups, paste-cache
+clipboard = true           # pbpaste/pbcopy, xclip, xsel
+browser-hijacking = true   # --remote-debugging-port, Puppeteer/Playwright
+
 [write-guard]
 enabled = true
 
@@ -147,6 +170,20 @@ Project override: `.claude/claude-guard.toml`.
 ## Audit Log
 
 Every tool call is logged to `~/.claude/logs/claude-audit.jsonl` - you can see what each session touched, when, and whether a guard blocked it.
+
+## Self-Protection
+
+For single-shot autonomous sessions (`claude -p`), hooks are snapshotted at session start. Even if the agent edits config mid-session, the running hooks don't change, and there's no second session to exploit. Turn self-protect on if you run interactive sessions where an agent could disable guards in one conversation and exploit the next.
+
+Self-protect blocks writes to guard scripts, `claude-guard.toml`, and `.claude/settings.json`.
+
+```bash
+# Enable via env var
+CLAUDE_GUARD_SELF_PROTECT=on claude
+
+# Or set it in your shell profile for all sessions
+export CLAUDE_GUARD_SELF_PROTECT=on
+```
 
 ## Limitations
 

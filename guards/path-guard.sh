@@ -4,6 +4,9 @@
 # Claude Code calls this before Read, Grep, Glob, Edit, and Bash tools.
 # It receives JSON on stdin with tool_name and tool_input.
 #
+# Categories can be toggled in claude-guard.toml under [path-guard.categories].
+# Missing categories default to ON — you must explicitly disable them.
+#
 # Philosophy: these are paths no AI agent should ever need to access.
 # If you actually need something from one of these paths, copy the data
 # to your working directory first (manually), then let the agent read it there.
@@ -45,130 +48,196 @@ fi
 
 HOME_DIR="$HOME"
 
-# === BLOCKLIST ===
-BLOCKED_PATTERNS=(
-  # --- Credentials & Secrets ---
-  # SSH keys, AWS credentials, cloud provider tokens, API keys
-  "$HOME_DIR/.ssh"
-  "$HOME_DIR/.aws"
-  "$HOME_DIR/.anthropic"
-  "$HOME_DIR/.config/gh/hosts"
-  "$HOME_DIR/.config/gcloud"
-  "$HOME_DIR/.config/rclone/rclone.conf"
-  "$HOME_DIR/.config/stripe"
-  "$HOME_DIR/.npmrc"
-  "$HOME_DIR/.docker/config.json"
-  "$HOME_DIR/.claude.json"
-  "$HOME_DIR/.kube/config"
-  "$HOME_DIR/.terraform.d/credentials"
-  "$HOME_DIR/.netrc"
-  "$HOME_DIR/.pgpass"
+# === CONFIG HELPERS ===
+# Find config file (same resolution as claude-guard.sh dispatcher)
+find_config() {
+  local project="${CLAUDE_PROJECT_DIR:-.}/.claude/claude-guard.toml"
+  local global="$HOME/.config/claude-guard/config.toml"
+  local bundled="$(cd "$(dirname "$0")/.." && pwd)/claude-guard.toml"
 
-  # --- Messages & Email (macOS) ---
-  # These paths exist on macOS. Harmless to check on Linux (won't match).
-  "$HOME_DIR/Library/Messages"
-  "$HOME_DIR/Library/Mail"
-  "Library/Application Support/Signal"
+  for f in "$project" "$global" "$bundled"; do
+    [ -f "$f" ] && echo "$f" && return
+  done
+}
 
-  # --- Browser Sessions (cookies = logged-in sessions) ---
-  # macOS paths
-  "$HOME_DIR/Library/Cookies"
-  "$HOME_DIR/Library/Safari"
-  "Library/Application Support/Google/Chrome"
-  "Library/Application Support/Arc"
-  "Library/Application Support/Firefox"
-  "Library/Application Support/BraveSoftware"
-  "Library/Application Support/Microsoft Edge"
-  "Library/Application Support/Dia"
-  # Linux paths
-  "$HOME_DIR/.config/google-chrome"
-  "$HOME_DIR/.config/chromium"
-  "$HOME_DIR/.mozilla/firefox"
-  "$HOME_DIR/.config/BraveSoftware"
+CONFIG_FILE=$(find_config)
 
-  # --- Keychains & System Accounts (macOS) ---
-  "$HOME_DIR/Library/Keychains"
-  "$HOME_DIR/Library/Accounts"
+# Check if a category is enabled. Defaults to ON if not specified.
+# Env override: CLAUDE_GUARD_PATH_CAT_<CATEGORY>=off
+category_enabled() {
+  local cat_name="$1"
+  # Env override (e.g. CLAUDE_GUARD_PATH_CAT_CREDENTIALS=off)
+  local env_var="CLAUDE_GUARD_PATH_CAT_$(echo "$cat_name" | tr '[:lower:]-' '[:upper:]_')"
+  local env_val="${!env_var:-}"
+  [ "$env_val" = "off" ] && return 1
+  [ "$env_val" = "on" ] && return 0
 
-  # --- Password Managers ---
-  # macOS 1Password paths
-  "Library/Containers/com.1password"
-  "Library/Group Containers/2BUA8C4S2C.com.1password"
-  "Library/Group Containers/2BUA8C4S2C.com.agilebits"
-  # Linux password manager paths
-  "$HOME_DIR/.config/1Password"
-  "$HOME_DIR/.local/share/keyrings"
-  "$HOME_DIR/.gnupg"
+  # Check toml
+  [ -z "$CONFIG_FILE" ] && return 0  # no config = all on
+  local val
+  val=$(awk -v sect="[path-guard.categories]" -v k="$cat_name" '
+    $0 == sect { in_s=1; next }
+    /^\[/ { in_s=0 }
+    in_s && $1 == k {
+      sub(/^[^=]*=[ \t]*/, "")
+      gsub(/"/, "")
+      print
+      found=1
+      exit
+    }
+    END { if (!found) print "true" }
+  ' "$CONFIG_FILE")
+  [ "$val" = "true" ]
+}
 
-  # --- System-Level Sensitive App Data (macOS) ---
-  "Library/Group Containers/group.com.apple.mail"
-  "Library/Group Containers/group.com.apple.messages"
-  "Library/Group Containers/group.com.apple.contacts"
-  "Library/Group Containers/UBF8T346G9.com.microsoft.oneauth"
-  "Library/Group Containers/UBF8T346G9.com.microsoft.entrabroker"
+# === DENY HELPER ===
+deny() {
+  jq -n --arg reason "$1" '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: $reason
+    }
+  }'
+  exit 0
+}
 
-  # --- Shell History ---
-  # Commands you've typed, database queries, Python REPL history
-  "$HOME_DIR/.bash_history"
-  "$HOME_DIR/.zsh_history"
-  "$HOME_DIR/.zsh_sessions"
-  "$HOME_DIR/.psql_history"
-  "$HOME_DIR/.python_history"
-  "$HOME_DIR/.node_repl_history"
-  "$HOME_DIR/.lesshst"
-  "$HOME_DIR/.mysql_history"
-  "$HOME_DIR/.rediscli_history"
+check_patterns() {
+  local category="$1"
+  shift
+  for pattern in "$@"; do
+    if echo "$CHECK_STRING" | grep -qF "$pattern"; then
+      deny "BLOCKED: access to sensitive path matching '$pattern'. This contains credentials, messages, browser sessions, or system secrets. Ask the user to provide this data manually if needed."
+    fi
+  done
+}
 
-  # --- Claude Code sensitive data ---
-  # History, paste cache, backups with auth tokens, session state.
-  # NOT blocking: settings.json, agents/, projects/, todos/, tasks/, teams/, plans/
-  "$HOME_DIR/.claude/history.jsonl"
-  "$HOME_DIR/.claude/paste-cache"
-  "$HOME_DIR/.claude/backups"
-  "$HOME_DIR/.claude/session-env"
-  "$HOME_DIR/.claude/shell-snapshots"
-  "$HOME_DIR/.claude/file-history"
-  "$HOME_DIR/.claude/debug"
-  "$HOME_DIR/.claude/cache"
-  "$HOME_DIR/.claude/downloads"
+# === CATEGORIES ===
+# Each category is a named group of patterns. Categories default to ON.
+# Disable in claude-guard.toml under [path-guard.categories] or via env var.
 
-  # --- Keychain CLI commands (for Bash tool, macOS) ---
-  "security dump-keychain"
-  "security find-generic-password"
-  "security find-internet-password"
-  "security export"
+if category_enabled "credentials"; then
+  check_patterns "credentials" \
+    "$HOME_DIR/.ssh" \
+    "$HOME_DIR/.aws" \
+    "$HOME_DIR/.anthropic" \
+    "$HOME_DIR/.config/gh/hosts" \
+    "$HOME_DIR/.config/gcloud" \
+    "$HOME_DIR/.config/rclone/rclone.conf" \
+    "$HOME_DIR/.config/stripe" \
+    "$HOME_DIR/.npmrc" \
+    "$HOME_DIR/.docker/config.json" \
+    "$HOME_DIR/.claude.json" \
+    "$HOME_DIR/.kube/config" \
+    "$HOME_DIR/.terraform.d/credentials" \
+    "$HOME_DIR/.netrc" \
+    "$HOME_DIR/.pgpass"
+fi
 
-  # --- Clipboard access (all vectors) ---
-  # macOS clipboard
-  "pbpaste"
-  "pbcopy"
-  # Programmatic clipboard APIs (Objective-C, Swift, cross-platform)
-  "the clipboard"
-  "NSPasteboard"
-  "generalPasteboard"
-  "UIPasteboard"
-  # Linux clipboard tools
-  "xclip"
-  "xsel"
-  "wl-paste"
-  "wl-copy"
+if category_enabled "browser-sessions"; then
+  check_patterns "browser-sessions" \
+    "$HOME_DIR/Library/Cookies" \
+    "$HOME_DIR/Library/Safari" \
+    "Library/Application Support/Google/Chrome" \
+    "Library/Application Support/Arc" \
+    "Library/Application Support/Firefox" \
+    "Library/Application Support/BraveSoftware" \
+    "Library/Application Support/Microsoft Edge" \
+    "Library/Application Support/Dia" \
+    "$HOME_DIR/.config/google-chrome" \
+    "$HOME_DIR/.config/chromium" \
+    "$HOME_DIR/.mozilla/firefox" \
+    "$HOME_DIR/.config/BraveSoftware"
+fi
 
-  # --- Clipboard manager storage (macOS) ---
-  "com.generalarcade.flycut"
+if category_enabled "messages"; then
+  check_patterns "messages" \
+    "$HOME_DIR/Library/Messages" \
+    "$HOME_DIR/Library/Mail" \
+    "Library/Application Support/Signal"
+fi
 
-  # --- Browser debug/automation hijacking ---
-  # An agent can relaunch your browser with --remote-debugging-port,
-  # connect via Puppeteer/Playwright, and access every authenticated
-  # session (email, bank, cloud storage) without any password prompt.
-  "remote-debugging-port"
-  "remote-debugging-pipe"
-  "remote-debugging-address"
-  "RemoteDebugging"
-  "DevTools"
-  "chrome-remote-interface"
-  "puppeteer.connect"
-  "playwright.connect"
-)
+if category_enabled "keychains"; then
+  check_patterns "keychains" \
+    "$HOME_DIR/Library/Keychains" \
+    "$HOME_DIR/Library/Accounts" \
+    "security dump-keychain" \
+    "security find-generic-password" \
+    "security find-internet-password" \
+    "security export"
+fi
+
+if category_enabled "password-managers"; then
+  check_patterns "password-managers" \
+    "Library/Containers/com.1password" \
+    "Library/Group Containers/2BUA8C4S2C.com.1password" \
+    "Library/Group Containers/2BUA8C4S2C.com.agilebits" \
+    "$HOME_DIR/.config/1Password" \
+    "$HOME_DIR/.local/share/keyrings" \
+    "$HOME_DIR/.gnupg"
+fi
+
+if category_enabled "system-data"; then
+  check_patterns "system-data" \
+    "Library/Group Containers/group.com.apple.mail" \
+    "Library/Group Containers/group.com.apple.messages" \
+    "Library/Group Containers/group.com.apple.contacts" \
+    "Library/Group Containers/UBF8T346G9.com.microsoft.oneauth" \
+    "Library/Group Containers/UBF8T346G9.com.microsoft.entrabroker"
+fi
+
+if category_enabled "shell-history"; then
+  check_patterns "shell-history" \
+    "$HOME_DIR/.bash_history" \
+    "$HOME_DIR/.zsh_history" \
+    "$HOME_DIR/.zsh_sessions" \
+    "$HOME_DIR/.psql_history" \
+    "$HOME_DIR/.python_history" \
+    "$HOME_DIR/.node_repl_history" \
+    "$HOME_DIR/.lesshst" \
+    "$HOME_DIR/.mysql_history" \
+    "$HOME_DIR/.rediscli_history"
+fi
+
+if category_enabled "claude-internals"; then
+  check_patterns "claude-internals" \
+    "$HOME_DIR/.claude/history.jsonl" \
+    "$HOME_DIR/.claude/paste-cache" \
+    "$HOME_DIR/.claude/backups" \
+    "$HOME_DIR/.claude/session-env" \
+    "$HOME_DIR/.claude/shell-snapshots" \
+    "$HOME_DIR/.claude/file-history" \
+    "$HOME_DIR/.claude/debug" \
+    "$HOME_DIR/.claude/cache" \
+    "$HOME_DIR/.claude/downloads"
+fi
+
+if category_enabled "clipboard"; then
+  check_patterns "clipboard" \
+    "pbpaste" \
+    "pbcopy" \
+    "the clipboard" \
+    "NSPasteboard" \
+    "generalPasteboard" \
+    "UIPasteboard" \
+    "xclip" \
+    "xsel" \
+    "wl-paste" \
+    "wl-copy" \
+    "com.generalarcade.flycut"
+fi
+
+if category_enabled "browser-hijacking"; then
+  check_patterns "browser-hijacking" \
+    "remote-debugging-port" \
+    "remote-debugging-pipe" \
+    "remote-debugging-address" \
+    "RemoteDebugging" \
+    "DevTools" \
+    "chrome-remote-interface" \
+    "puppeteer.connect" \
+    "playwright.connect"
+fi
 
 # === SELF-PROTECTION (off by default) ===
 # Blocks modifications to guard scripts and Claude settings.
@@ -197,14 +266,7 @@ if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ] || [ "$TOOL_NAME" = "
           continue
         fi
       fi
-      jq -n '{
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: "BLOCKED: cannot modify security hooks or Claude settings. Run this from your terminal to disable guards: ~/.config/claude-guard/guard-toggle.sh off"
-        }
-      }'
-      exit 0
+      deny "BLOCKED: cannot modify security hooks or Claude settings. Run this from your terminal to disable guards: ~/.config/claude-guard/guard-toggle.sh off"
     fi
   done
 fi
@@ -220,53 +282,28 @@ if [ -f "$CUSTOM_LIST" ]; then
   while IFS= read -r line; do
     [[ -z "$line" || "$line" == \#* ]] && continue
     line="${line/\$HOME/$HOME_DIR}"
-    BLOCKED_PATTERNS+=("$line")
+    if echo "$CHECK_STRING" | grep -qF "$line"; then
+      deny "BLOCKED: access to sensitive path matching '$line'. This contains credentials, messages, browser sessions, or system secrets. Ask the user to provide this data manually if needed."
+    fi
   done < "$CUSTOM_LIST"
 fi
-
-for pattern in "${BLOCKED_PATTERNS[@]}"; do
-  if echo "$CHECK_STRING" | grep -qF "$pattern"; then
-    jq -n \
-      --arg reason "BLOCKED: access to sensitive path matching '$pattern'. This contains credentials, messages, browser sessions, or system secrets. Ask the user to provide this data manually if needed." \
-      '{
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: $reason
-        }
-      }'
-    exit 0
-  fi
-done
 
 # Block .env file reads — scoped based on setup preferences.
 # If .env-project-allowed marker exists (user said yes to project .env access during setup),
 # only block home directory .env files. Otherwise block all .env files.
-GUARD_DIR="${CLAUDE_GUARD_INSTALL_DIR:-$HOME/.config/claude-guard}"
-if echo "$CHECK_STRING" | grep -qE '\.env($|[^a-zA-Z])'; then
-  if ! echo "$CHECK_STRING" | grep -qF '.venv'; then
-    if [ -f "$GUARD_DIR/.env-project-allowed" ]; then
-      # Scoped mode: only block home directory .env files
-      if echo "$CHECK_STRING" | grep -qE "^$HOME_DIR/\.[^/]*env" || echo "$CHECK_STRING" | grep -qE "cat.*$HOME_DIR/\.[^/]*env"; then
-        jq -n '{
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "deny",
-            permissionDecisionReason: "BLOCKED: home directory .env files may contain production secrets. Project .env files are allowed."
-          }
-        }'
-        exit 0
+if category_enabled "credentials"; then
+  GUARD_DIR="${CLAUDE_GUARD_INSTALL_DIR:-$HOME/.config/claude-guard}"
+  if echo "$CHECK_STRING" | grep -qE '\.env($|[^a-zA-Z])'; then
+    if ! echo "$CHECK_STRING" | grep -qF '.venv'; then
+      if [ -f "$GUARD_DIR/.env-project-allowed" ]; then
+        # Scoped mode: only block home directory .env files
+        if echo "$CHECK_STRING" | grep -qE "^$HOME_DIR/\.[^/]*env" || echo "$CHECK_STRING" | grep -qE "cat.*$HOME_DIR/\.[^/]*env"; then
+          deny "BLOCKED: home directory .env files may contain production secrets. Project .env files are allowed."
+        fi
+      else
+        # Default: block all .env files
+        deny "BLOCKED: .env files may contain credentials. Ask the user to provide specific values instead."
       fi
-    else
-      # Default: block all .env files
-      jq -n '{
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: "BLOCKED: .env files may contain credentials. Ask the user to provide specific values instead."
-        }
-      }'
-      exit 0
     fi
   fi
 fi

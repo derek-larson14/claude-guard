@@ -264,6 +264,27 @@ OUT=$(echo '{"tool_name":"Read","tool_input":{"file_path":"'"$HOME"'/.ssh/id_rsa
 check_empty "CLAUDE_GUARD_PATH_GUARD=off disables path-guard" "$OUT"
 unset CLAUDE_GUARD_PATH_GUARD
 
+# --- category overrides ---
+echo "--- category overrides ---"
+
+# Test: disabling credentials category allows SSH key read
+export CLAUDE_GUARD_PATH_CAT_CREDENTIALS=off
+OUT=$(echo '{"tool_name":"Read","tool_input":{"file_path":"'"$HOME"'/.ssh/id_rsa"}}' | "$GUARD")
+check_empty "category off: credentials=off allows SSH key read" "$OUT"
+unset CLAUDE_GUARD_PATH_CAT_CREDENTIALS
+
+# Test: disabling clipboard category allows pbpaste
+export CLAUDE_GUARD_PATH_CAT_CLIPBOARD=off
+OUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"pbpaste"}}' | "$GUARD")
+check_empty "category off: clipboard=off allows pbpaste" "$OUT"
+unset CLAUDE_GUARD_PATH_CAT_CLIPBOARD
+
+# Test: disabling one category doesn't affect others
+export CLAUDE_GUARD_PATH_CAT_CLIPBOARD=off
+OUT=$(echo '{"tool_name":"Read","tool_input":{"file_path":"'"$HOME"'/.ssh/id_rsa"}}' | "$GUARD")
+check "category isolation: clipboard=off still blocks SSH" "BLOCKED.*sensitive path" "$OUT"
+unset CLAUDE_GUARD_PATH_CAT_CLIPBOARD
+
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 exit $FAIL

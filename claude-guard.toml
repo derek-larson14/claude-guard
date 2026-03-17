@@ -9,6 +9,19 @@ enabled = true
 # Blocks reads to credentials, messages, browser sessions, keychains,
 # clipboard access, shell history, and .env files.
 # See guards/path-guard.sh for the full blocklist.
+# Toggle individual categories below. All default to ON if omitted.
+
+[path-guard.categories]
+credentials = true         # SSH, AWS, API tokens, .env, Docker/K8s config
+browser-sessions = true    # Chrome, Arc, Firefox, Safari, Brave, Edge, Dia
+messages = true            # iMessage, Mail, Signal
+keychains = true           # macOS Keychains, Accounts, security CLI commands
+password-managers = true   # 1Password, GNOME keyring, GPG
+system-data = true         # macOS Group Containers (mail, messages, contacts, MS auth)
+shell-history = true       # .bash_history, .zsh_history, .psql_history, etc.
+claude-internals = true    # .claude/history, backups, paste-cache, session data
+clipboard = true           # pbpaste/pbcopy, xclip, xsel, NSPasteboard
+browser-hijacking = true   # --remote-debugging-port, Puppeteer/Playwright connect
 
 [write-guard]
 enabled = true
