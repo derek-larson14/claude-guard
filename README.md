@@ -40,14 +40,14 @@ Using a PreToolUse hook, four guards run in sequence, the first deny blocks the 
 
 ```
 Tool call → claude-guard.sh (dispatcher)
-  → path-guard.sh      blocks sensitive file reads
+  → path-guard.sh      blocks access to sensitive paths
   → write-guard.sh     blocks dangerous writes
   → workspace-guard.sh optional: scopes to project dir
   → network-guard.sh   sandboxes or blocks network
   → audit-log.sh       logs to JSONL
 ```
 
-**Path guard** blocks reads to credentials, browser sessions, keychains, clipboard, shell history, and more. Patterns are organized into categories that can be individually toggled in `claude-guard.toml` or via env vars. All categories default to ON if not specified, so removing config makes things stricter, not looser.
+**Path guard** blocks access to sensitive paths — credentials, browser sessions, keychains, clipboard, shell history, and more. Patterns are organized into categories that can be individually toggled in `claude-guard.toml` or via env vars.
 
 **Network guard** has three modes: `sandbox` (macOS, kernel-level network blocking on all Bash), `pattern` (cross-platform, blocks weaponized patterns), or `off` (pattern checks still run as defense-in-depth).
 
